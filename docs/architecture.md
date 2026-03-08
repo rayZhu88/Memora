@@ -54,16 +54,36 @@ Internal application facade named `Memora`. It owns the implementation behind th
 
 ### `memora-llm`
 
-Provider-agnostic chat abstraction. V1 keeps a single `LlmClient` interface and hides provider differences behind config:
+Provider-backed model access. V1 now keeps two explicit interfaces:
+
+- `LlmClient`
+- `EmbeddingClient`
+
+Chat providers:
 
 - `KIMI`
 - `ZHIPU`
 - `MINIMAX`
 
+Embedding providers:
+
+- `ZHIPU`
+
 Interaction model:
 
 - synchronous chat is the default
 - a separate streaming SPI exists, but streaming is not the primary path for internal memory workflows
+
+### `memora-vector`
+
+Vector abstraction and provider integration layer.
+
+V1 currently includes:
+
+- `VectorStore`
+- `QdrantVectorStore`
+
+This keeps semantic retrieval separate from the default memory store instead of coupling vector search into `MemoryEntryStore`.
 
 ### `memora-storage-sqlite`
 
@@ -90,3 +110,4 @@ What is intentionally deferred:
 - admin APIs
 - fetch or retrieve as public contracts
 - complex filter DSL
+- hybrid retrieval orchestration

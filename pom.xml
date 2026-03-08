@@ -15,6 +15,7 @@
         <module>memora-adapter-spi</module>
         <module>memora-core</module>
         <module>memora-llm</module>
+        <module>memora-vector</module>
     </modules>
 
     <properties>
@@ -22,6 +23,7 @@
         <java.version>17</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
+        <jackson.version>2.15.3</jackson.version>
         <spring.boot.version>2.7.18</spring.boot.version>
         <sqlite.jdbc.version>3.45.1.0</sqlite.jdbc.version>
     </properties>

@@ -14,7 +14,8 @@ The current repository is aligned to a conservative v1 northbound contract and a
 - `memora-api`: northbound controller contract and DTOs
 - `memora-adapter-spi`: adapter contracts for browser, CLI, desktop, and IDE integrations
 - `memora-core`: internal `Memora` facade and pure Java application services
-- `memora-llm`: provider-agnostic chat abstraction for Kimi, Zhipu, and MiniMax
+- `memora-llm`: provider-agnostic chat and embedding abstractions
+- `memora-vector`: vector storage abstraction with Qdrant integration
 - `memora-storage-sqlite`: SQLite-backed repository implementation, currently in the optional `integration-modules` Maven profile
 - `memora-transport-http`: Spring Boot HTTP entrypoint, currently in the optional `integration-modules` Maven profile
 
@@ -35,7 +36,14 @@ Shared request context:
 
 ## LLM Abstraction
 
-`memora-llm` provides a single `LlmClient` contract for provider-backed chat completions.
+`memora-llm` now provides:
+
+- `LlmClient` for chat completions
+- `EmbeddingClient` for text vectorization
+
+Embedding support in v1:
+
+- `ZHIPU` embedding models via `/embeddings`
 
 V1 interaction model:
 
@@ -47,6 +55,15 @@ V1 provider profiles:
 - `KIMI`
 - `ZHIPU`
 - `MINIMAX`
+
+## Vector Support
+
+`memora-vector` provides:
+
+- `VectorStore`
+- `QdrantVectorStore`
+
+This keeps vector search optional and separate from the main memory store. `Memora` can continue using local `SQLite/FTS` for v1 while Qdrant is added as a semantic retrieval backend.
 
 ## Local Build
 
@@ -66,5 +83,6 @@ mvn test -Pintegration-modules
 
 - finish SQLite-backed search ranking and write behavior
 - add transport tests for the HTTP module
+- wire `EmbeddingClient` and `VectorStore` into a hybrid retrieval pipeline
 - add browser, CLI, and desktop adapters on top of the HTTP API
 - introduce fact extraction and profile projection after the v1 API stabilizes

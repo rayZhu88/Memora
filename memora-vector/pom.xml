@@ -10,9 +10,9 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>memora-llm</artifactId>
-    <name>memora-llm</name>
-    <description>Provider-agnostic chat and embedding abstractions for Memora.</description>
+    <artifactId>memora-vector</artifactId>
+    <name>memora-vector</name>
+    <description>Vector storage abstraction and Qdrant integration for Memora.</description>
 
     <dependencies>
         <dependency>

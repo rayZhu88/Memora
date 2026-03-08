@@ -1,22 +1,24 @@
 package io.memora.llm;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.memora.llm.internal.JsonSupport;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public final class HttpChatLlmClient implements LlmClient {
     private final LlmClientConfig config;
+    private final HttpTransport transport;
 
     public HttpChatLlmClient(LlmClientConfig config) {
-        this.config = config;
+        this(config, new UrlConnectionHttpTransport());
+    }
+
+    HttpChatLlmClient(LlmClientConfig config, HttpTransport transport) {
+        this.config = Objects.requireNonNull(config, "config");
+        this.transport = Objects.requireNonNull(transport, "transport");
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -25,101 +27,80 @@ public final class HttpChatLlmClient implements LlmClient {
         String endpoint = joinUrl(config.getBaseUrl(), config.getProvider().getChatCompletionsPath());
         String payload = buildPayload(request);
 
-        try {
-            HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setConnectTimeout(config.getConnectTimeoutMs());
-            connection.setReadTimeout(config.getReadTimeoutMs());
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Authorization", "Bearer " + config.getApiKey());
-            for (Map.Entry<String, String> header : config.getExtraHeaders().entrySet()) {
-                connection.setRequestProperty(header.getKey(), header.getValue());
-            }
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("Content-Type", "application/json");
+        headers.put("Authorization", "Bearer " + config.getApiKey());
+        headers.putAll(config.getExtraHeaders());
 
-            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(body.length);
-            OutputStream outputStream = connection.getOutputStream();
-            try {
-                outputStream.write(body);
-                outputStream.flush();
-            } finally {
-                outputStream.close();
-            }
+        HttpResponse response = transport.post(
+                endpoint,
+                headers,
+                payload,
+                config.getConnectTimeoutMs(),
+                config.getReadTimeoutMs());
 
-            int status = connection.getResponseCode();
-            String responseBody = status >= 400
-                    ? readBody(connection.getErrorStream())
-                    : readBody(connection.getInputStream());
-
-            if (status >= 400) {
-                throw new LlmException("LLM request failed with status " + status + ": " + responseBody);
-            }
-
-            return parseResponse(responseBody);
-        } catch (IOException exception) {
-            throw new LlmException("Failed to call LLM provider " + config.getProvider(), exception);
+        if (response.getStatusCode() >= 400) {
+            throw new LlmException(
+                    "LLM request failed with status " + response.getStatusCode() + ": " + response.getBody());
         }
+
+        return parseResponse(response.getBody());
     }
 
     /*
      * Streaming is intentionally not implemented in v1.
      * The sync chat path remains the default for Memora internal workflows.
-     */
+    */
 
     private ChatResponse parseResponse(String responseBody) {
-        Map<String, Object> root = JsonSupport.parseObject(responseBody);
-        List<Object> choices = JsonSupport.readList(root, "choices");
-        Map<String, Object> firstChoice = choices.isEmpty() ? null : JsonSupport.asObject(choices.get(0));
-        Map<String, Object> message = firstChoice == null ? null : JsonSupport.readObject(firstChoice, "message");
+        JsonNode root = JsonSupport.parseTree(responseBody);
+        JsonNode firstChoice = root.path("choices").isArray() && root.path("choices").size() > 0
+                ? root.path("choices").get(0)
+                : null;
+        JsonNode message = firstChoice == null ? null : firstChoice.path("message");
 
-        String content = message == null ? null : JsonSupport.readString(message, "content");
-        String id = JsonSupport.readString(root, "id");
-        String model = JsonSupport.readString(root, "model");
+        String content = message == null || message.isMissingNode() ? null : message.path("content").asText(null);
+        String id = root.path("id").asText(null);
+        String model = root.path("model").asText(null);
 
-        Map<String, Object> usage = JsonSupport.readObject(root, "usage");
-        LlmUsage tokenUsage = usage == null
+        JsonNode usage = root.path("usage");
+        LlmUsage tokenUsage = usage.isMissingNode()
                 ? new LlmUsage(null, null, null)
                 : new LlmUsage(
-                        JsonSupport.readInteger(usage, "prompt_tokens"),
-                        JsonSupport.readInteger(usage, "completion_tokens"),
-                        JsonSupport.readInteger(usage, "total_tokens"));
+                        usage.path("prompt_tokens").isNumber() ? Integer.valueOf(usage.path("prompt_tokens").asInt()) : null,
+                        usage.path("completion_tokens").isNumber()
+                                ? Integer.valueOf(usage.path("completion_tokens").asInt())
+                                : null,
+                        usage.path("total_tokens").isNumber() ? Integer.valueOf(usage.path("total_tokens").asInt()) : null);
 
         return new ChatResponse(id, config.getProvider(), model, content, tokenUsage, responseBody);
     }
 
     private String buildPayload(ChatRequest request) {
-        StringBuilder builder = new StringBuilder();
-        builder.append('{');
-        builder.append("\"model\":").append(JsonSupport.quote(resolveModel(request))).append(',');
-        builder.append("\"stream\":false,");
-        builder.append("\"messages\":[");
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("model", resolveModel(request));
+        payload.put("stream", Boolean.FALSE);
 
-        List<ChatMessage> messages = request.getMessages();
-        for (int index = 0; index < messages.size(); index++) {
-            ChatMessage message = messages.get(index);
-            if (index > 0) {
-                builder.append(',');
-            }
-            builder.append('{')
-                    .append("\"role\":").append(JsonSupport.quote(message.getRole().getWireValue())).append(',')
-                    .append("\"content\":").append(JsonSupport.quote(message.getContent()))
-                    .append('}');
+        List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+        for (ChatMessage message : request.getMessages()) {
+            Map<String, Object> messageBody = new LinkedHashMap<String, Object>();
+            messageBody.put("role", message.getRole().getWireValue());
+            messageBody.put("content", message.getContent());
+            messages.add(messageBody);
         }
-        builder.append(']');
+        payload.put("messages", messages);
 
         if (request.getTemperature() != null) {
-            builder.append(",\"temperature\":").append(request.getTemperature());
+            payload.put("temperature", request.getTemperature());
         }
         if (request.getTopP() != null) {
-            builder.append(",\"top_p\":").append(request.getTopP());
+            payload.put("top_p", request.getTopP());
         }
         if (request.getMaxTokens() != null) {
-            builder.append(",\"max_tokens\":").append(request.getMaxTokens());
+            payload.put("max_tokens", request.getMaxTokens());
         }
 
-        builder.append('}');
-        return builder.toString();
+        return JsonSupport.writeJson(payload);
     }
 
     private String resolveModel(ChatRequest request) {
@@ -149,23 +130,5 @@ public final class HttpChatLlmClient implements LlmClient {
             return baseUrl + "/" + path;
         }
         return baseUrl + path;
-    }
-
-    private static String readBody(InputStream inputStream) throws IOException {
-        if (inputStream == null) {
-            return "";
-        }
-
-        BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-        try {
-            StringBuilder builder = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                builder.append(line);
-            }
-            return builder.toString();
-        } finally {
-            reader.close();
-        }
     }
 }

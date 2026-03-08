@@ -1,75 +1,50 @@
 package io.memora.llm.internal;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.memora.llm.LlmException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
-import javax.script.ScriptException;
+import java.util.Collections;
 
 public final class JsonSupport {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private JsonSupport() {
     }
 
     public static String quote(String value) {
-        if (value == null) {
-            return "null";
+        try {
+            return OBJECT_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new LlmException("Failed to encode JSON string", exception);
         }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append('"');
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
-            switch (character) {
-                case '"':
-                    builder.append("\\\"");
-                    break;
-                case '\\':
-                    builder.append("\\\\");
-                    break;
-                case '\b':
-                    builder.append("\\b");
-                    break;
-                case '\f':
-                    builder.append("\\f");
-                    break;
-                case '\n':
-                    builder.append("\\n");
-                    break;
-                case '\r':
-                    builder.append("\\r");
-                    break;
-                case '\t':
-                    builder.append("\\t");
-                    break;
-                default:
-                    if (character < 0x20) {
-                        builder.append(String.format("\\u%04x", (int) character));
-                    } else {
-                        builder.append(character);
-                    }
-            }
-        }
-        builder.append('"');
-        return builder.toString();
     }
 
-    @SuppressWarnings("unchecked")
     public static Map<String, Object> parseObject(String json) {
-        ScriptEngine engine = new ScriptEngineManager().getEngineByName("nashorn");
-        if (engine == null) {
-            throw new LlmException("Nashorn JavaScript engine is not available for JSON parsing");
-        }
-
         try {
-            Object result = engine.eval("Java.asJSONCompatible(" + json + ")");
-            if (result instanceof Map) {
-                return (Map<String, Object>) result;
-            }
-            throw new LlmException("Expected JSON object response");
-        } catch (ScriptException exception) {
+            return OBJECT_MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception exception) {
             throw new LlmException("Failed to parse JSON response", exception);
+        }
+    }
+
+    public static JsonNode parseTree(String json) {
+        try {
+            return OBJECT_MAPPER.readTree(json);
+        } catch (Exception exception) {
+            throw new LlmException("Failed to parse JSON response", exception);
+        }
+    }
+
+    public static String writeJson(Object value) {
+        try {
+            return OBJECT_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new LlmException("Failed to encode JSON payload", exception);
         }
     }
 
@@ -107,4 +82,3 @@ public final class JsonSupport {
         return null;
     }
 }
-
